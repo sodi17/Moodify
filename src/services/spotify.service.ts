@@ -258,36 +258,40 @@ export class SpotifyService {
    * Obtener recomendaciones basadas en seeds
    */
   async getRecommendations(
-    accessToken: string,
-    moodType: MoodType,
-    intensity: MoodIntensity,
-    userGenres?: string[],
-    limit: number = 20
-  ): Promise<SpotifyTrack[]> {
-    try {
-      const params = recommendationService.getSpotifySearchParams(moodType, intensity, userGenres);
-      
-      const response = await axios.get(
-        `${this.baseUrl}/recommendations`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
-          },
-          params: {
-            ...params,
-            limit
-          }
+  accessToken: string,
+  moodType: MoodType,
+  intensity: MoodIntensity,
+  userGenres?: string[],
+  limit: number = 20
+): Promise<SpotifyTrack[]> {
+  try {
+    const params = recommendationService.getSpotifySearchParams(moodType, intensity, userGenres);
+    
+    // Spotify requiere al menos 1 seed (género, artista o track)
+    const response = await axios.get(
+      `${this.baseUrl}/recommendations`,
+      {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        params: {
+          seed_genres: params.seed_genres,  // Géneros como seed
+          target_valence: params.target_valence,  // 0.8 para happy
+          target_energy: params.target_energy,    // 0.7 para happy
+          target_danceability: params.target_danceability,
+          min_tempo: params.min_tempo,
+          max_tempo: params.max_tempo,
+          limit,
+          market: 'US'
         }
-      );
+      }
+    );
 
-      return response.data.tracks;
-    } catch (error: any) {
-      console.error('Error obteniendo recomendaciones:', error.response?.data || error.message);
-      
-      // Fallback: buscar por género si falla
-      return await this.searchTracksByMood(accessToken, moodType, intensity, userGenres, limit);
-    }
+    return response.data.tracks;
+  } catch (error: any) {
+    console.error('Error con /recommendations:', error.response?.data);
+    // Fallback: buscar por género
+    return await this.searchByGenreOnly(accessToken, moodType, intensity, limit, userGenres);
   }
+}
 
   /**
    * Crear playlist en la cuenta del usuario
@@ -584,6 +588,33 @@ export class SpotifyService {
     await user.save();
 
     return user;
+  }
+  // Nuevo método de fallback más inteligente
+  private async searchByGenreOnly(
+  accessToken: string,
+  moodType: MoodType,
+  intensity: MoodIntensity,
+  limit: number,
+  userGenres?: string[]
+): Promise<SpotifyTrack[]> {
+  const profile = recommendationService.getMusicProfile(moodType, intensity);
+  const genre = userGenres?.[0] || profile.genres[0];
+  
+  // Buscar solo por género, sin keywords en el título
+  const response = await axios.get(
+    `${this.baseUrl}/search`,
+    {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      params: {
+        q: `genre:"${genre}"`,  // Solo género, sin keywords
+        type: 'track',
+        limit,
+        market: 'US'
+      }
+    }
+  );
+
+  return response.data.tracks.items;
   }
 }
 
